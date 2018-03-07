@@ -174,7 +174,14 @@ void findHogSerial(vector<string> &files) {
     int idx=0;
     Mat image, grayImg, binaryImg;
     RNG rng(12345);
+   
     HOGDescriptor hog;
+    hog.winSize = Size(320, 160);
+    hog.blockSize = Size(16, 16);
+    hog.blockStride = Size(8, 8);
+    hog.cellSize = Size(4, 4);
+
+
     vector< float > descriptors;
 
     tbb::tick_count::interval_t t0_threshold((double)0), t0_gray((double)0), t0_findContour((double)0);;
@@ -191,6 +198,8 @@ void findHogSerial(vector<string> &files) {
         t0_gray += (tbb::tick_count::now()-t0);
 
         hog.compute( grayImg, descriptors, Size( 8, 8 ), Size( 2, 2 ) );
+
+        cout << "descriptor size is " << descriptors.size() << endl;
     }
 }
 
@@ -210,7 +219,7 @@ int main()
     t0 = tbb::tick_count::now();
     findHogSerial(imgNameList); 
     t1 = tbb::tick_count::now();
-    cout << "findContourSerial takes " << (t1 - t0).seconds() << endl;
+    cout << "findHogSerial takes " << (t1 - t0).seconds() << endl;
 
     return 0;
 }
