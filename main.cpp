@@ -5,6 +5,7 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/objdetect.hpp>
 
+
 #include "tbb/task_scheduler_init.h"
 #include "tbb/tick_count.h"
 #include "tbb/pipeline.h"
@@ -196,8 +197,8 @@ void findHogSerial(vector<string> &files) {
         t0 = tbb::tick_count::now();
         cvtColor(image, grayImg, CV_RGB2GRAY);
         t0_gray += (tbb::tick_count::now()-t0);
-
-        hog.compute( grayImg, descriptors, Size( 8, 8 ), Size( 2, 2 ) );
+        hog.winSize = Size(grayImg.cols, grayImg.rows);
+        hog.compute( grayImg, descriptors, Size( 0, 0 ), Size( 0, 0 ) );
 
         cout << "descriptor size is " << descriptors.size() << endl;
     }
