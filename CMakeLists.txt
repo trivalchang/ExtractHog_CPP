@@ -15,6 +15,8 @@ IF (HDF5_FOUND)
 	message("HDF5_INCLUDE_DIR ${HDF5_INCLUDE_DIR}")
 	message("HDF5_C_LIBRARIES ${HDF5_C_LIBRARIES}")
 	message("HDF5_LIBRARIES ${HDF5_LIBRARIES}")
+	message("HDF5_LIBRARY_DIRS ${HDF5_LIBRARY_DIRS}")
+	link_directories(${HDF5_LIBRARY_DIRS})
 ENDIF()
 
 add_compile_options(-g -std=c++11)
@@ -22,5 +24,5 @@ add_compile_options(-g -std=c++11)
 SET( CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} ${MY_COMPILE_FLAGS}" )
 
 add_executable( extractHog main.cpp )
-target_link_libraries( extractHog ${OpenCV_LIBS} ${HDF5_C_LIBRARIES} tbb)
+target_link_libraries( extractHog ${OpenCV_LIBS} ${HDF5_LIBRARIES} tbb hdf5_cpp)
 

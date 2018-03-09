@@ -25,6 +25,9 @@
 
 #endif
 
+#include "H5Cpp.h"
+using namespace H5;
+
 
 #if defined(__APPLE__) && defined(__MACH__)
 
@@ -171,6 +174,12 @@ void findHogParallel(vector<string> &files) {
     );
 }
 
+typedef struct
+{
+    int classIdx;
+    int feature[100];
+} hogFeature;
+
 void findHogSerial(vector<string> &files) {
     int idx=0;
     Mat image, grayImg, binaryImg;
@@ -205,22 +214,130 @@ void findHogSerial(vector<string> &files) {
 }
 
 
+void saveFeatureToHDF5()
+{
+    #define IMG_NUMBER  10
+
+    #define FILE_NAME       "feature.h5"
+    #define DATASET_NAME    "dataset"
+    hid_t hog_tid;
+    hid_t array_tid;
+    hid_t dataset, space, file; /* Handles */
+    hsize_t array_dim[] = {100};
+    hsize_t img_dim[] = {IMG_NUMBER};
+    herr_t status;
+
+
+    //H5File file(FILE_NAME, H5F_ACC_TRUNC);
+
+    file = H5Fcreate(FILE_NAME, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+
+    hogFeature featureArray[IMG_NUMBER];
+
+    int num = 0;
+    for (int i = 0; i < IMG_NUMBER; i++)
+    {
+        num = i * 1000;
+        featureArray[i].classIdx = i;
+        for (int j = 0; j < 100; j++)
+        {
+            featureArray[i].feature[j] = num;
+            num += 1;
+        }
+    }
+
+    space = H5Screate_simple(1, img_dim, NULL);
+    array_tid = H5Tarray_create(H5T_NATIVE_INT, 1, array_dim);
+
+    hog_tid = H5Tcreate (H5T_COMPOUND, sizeof(hogFeature));
+
+    H5Tinsert(hog_tid, "classIdx", HOFFSET(hogFeature, classIdx), H5T_NATIVE_INT);
+    H5Tinsert(hog_tid, "feature", HOFFSET(hogFeature, feature), array_tid);
+
+    dataset = H5Dcreate(file, DATASET_NAME, hog_tid, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
+    status = H5Dwrite(dataset, hog_tid, H5S_ALL, H5S_ALL, H5P_DEFAULT, featureArray);
+
+
+    H5Tclose(hog_tid);
+    H5Tclose(array_tid);
+    H5Sclose(space);
+    H5Dclose(dataset);
+    H5Fclose(file);
+    
+}
+
+
+void loadFeatureToHDF5()
+{
+    #define IMG_NUMBER  10
+
+    #define FILE_NAME       "feature.h5"
+    #define DATASET_NAME    "dataset"
+    hid_t hog_tid;
+    hid_t array_tid;
+    hid_t dataset, space, file; /* Handles */
+    hid_t memSpace;
+    hsize_t dims_out[] = {0, 0};
+    hsize_t out_dim[] = {1};
+    hsize_t coords[] = {0};
+    herr_t status;
+    hsize_t size;
+    hsize_t rank, npoints;
+
+
+    //H5File file(FILE_NAME, H5F_ACC_TRUNC);
+
+    file = H5Fopen(FILE_NAME, H5F_ACC_RDONLY, H5P_DEFAULT);
+    dataset = H5Dopen(file, DATASET_NAME, H5P_DEFAULT);
+    hog_tid = H5Dget_type(dataset); 
+
+    space = H5Dget_space(dataset);    /* dataspace handle */
+    rank = H5Sget_simple_extent_ndims(space);
+    size = H5Dget_storage_size(dataset);
+    H5Sget_simple_extent_dims(space, dims_out, NULL);   
+    npoints = H5Sget_simple_extent_npoints(space);
+
+    cout << __FUNCTION__ << " size is " << size << endl;
+    cout << __FUNCTION__ << " rank is " << rank << endl;    
+    cout << __FUNCTION__ << " dims_out is " << dims_out[0] << "," << dims_out[1] << endl;    
+    cout << __FUNCTION__ << " npoints is " << npoints << endl;    
+
+    memSpace = H5Screate_simple(1, out_dim, NULL);
+
+    coords[0] = 9;
+    status = H5Sselect_elements(space, H5S_SELECT_SET, 1, (const hsize_t *)&coords);
+    hogFeature f;
+    status = H5Dread(dataset, hog_tid, memSpace, space, H5P_DEFAULT, &f);
+
+    cout << "class: " << f.classIdx << endl;
+    for (int i = 0; i < 100; i++)
+    {
+        cout << f.feature[i] << ' ';
+    }
+    cout << endl;
+
+    H5Tclose(hog_tid);
+    H5Sclose(space);
+    H5Sclose(memSpace);
+    H5Dclose(dataset);
+    H5Fclose(file);
+
+}
+
 int main() 
 {
 	vector<string> imgNameList;
 	getdir("./samples", imgNameList);
 	cout << "img count = " << imgNameList.size() << endl;
     tbb::tick_count t0, t1;
-/*
-    tbb::tick_count t0 = tbb::tick_count::now();
-    findHogParallel(imgNameList);  
-    tbb::tick_count t1 = tbb::tick_count::now();
-    cout << "findHogParallel takes " << (t1 - t0).seconds() << endl;
-*/
+
     t0 = tbb::tick_count::now();
     findHogSerial(imgNameList); 
     t1 = tbb::tick_count::now();
     cout << "findHogSerial takes " << (t1 - t0).seconds() << endl;
+
+    saveFeatureToHDF5();
+    loadFeatureToHDF5();
 
     return 0;
 }
