@@ -64,6 +64,15 @@ using namespace tbb;
 using namespace cv;
 using namespace std;
 
+typedef struct
+{
+    int classIdx;
+    float *feature;
+} hogFeature;
+
+#define HOG_FEATURE_SIZE    ((sizeof(float) * 100) + sizeof(int))
+
+
 int getdir (string dir, vector<string> &files)
 {
     DIR *dp;
@@ -174,43 +183,98 @@ void findHogParallel(vector<string> &files) {
     );
 }
 
-typedef struct
-{
-    int classIdx;
-    int feature[100];
-} hogFeature;
 
-void findHogSerial(vector<string> &files) {
+void findHogSerial(vector<string> &files, Size roiSize) 
+{
+    #define FILE_NAME       "feature.h5"
+    #define DATASET_NAME    "dataset"
+
     int idx=0;
     Mat image, grayImg, binaryImg;
     RNG rng(12345);
-   
+
+    hid_t hog_tid;
+    hid_t array_tid;
+    hid_t dataset, space, feature_file; /* Handles */
+    hsize_t array_dim[] = {0};
+    hsize_t img_dim[] = {4};//{files.size()};
+    hsize_t max_dim[] = {100};
+    herr_t status;
+    size_t featureLen;
+    
+
     HOGDescriptor hog;
-    hog.winSize = Size(320, 160);
+    hog.winSize = roiSize;
     hog.blockSize = Size(16, 16);
     hog.blockStride = Size(8, 8);
     hog.cellSize = Size(4, 4);
 
+    // create a new HDF5 file
+    feature_file = H5Fcreate(FILE_NAME, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
+    // create HDF5 space
+    space = H5Screate_simple(1, img_dim, NULL);
+    // initialize array dimension with feature descriptor len and create array data type
+    featureLen = array_dim[0] = hog.getDescriptorSize();
+    cout << "getDescriptorSize return " << featureLen << endl;
+
+    array_tid = H5Tarray_create(H5T_NATIVE_FLOAT, 1, array_dim);
+    // create a compound data type with a class ID and a feature descriptor
+    hog_tid = H5Tcreate (H5T_COMPOUND, sizeof(int) + sizeof(float) * array_dim[0]);
+    H5Tinsert(hog_tid, "classIdx", HOFFSET(hogFeature, classIdx), H5T_NATIVE_INT);
+    //H5Tinsert(hog_tid, "feature", HOFFSET(hogFeature, feature), array_tid);
+    H5Tinsert(hog_tid, "feature", 4, array_tid);    
+    // create dataset
+    dataset = H5Dcreate(feature_file, DATASET_NAME, hog_tid, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);    
+
+    // create a continuous buffer for HDF5 write
+    char *hogFeatureBuff = (char *)malloc(sizeof(int) + sizeof(float) * featureLen);
+    float *pFeature = (float *) &hogFeatureBuff[sizeof(int)];
+    int *classIdx = (int *) hogFeatureBuff;
 
     vector< float > descriptors;
 
     tbb::tick_count::interval_t t0_threshold((double)0), t0_gray((double)0), t0_findContour((double)0);;
     
-    //namedWindow( "Display window", WINDOW_AUTOSIZE );// Create a window for display.
+    hsize_t coords[] = {0};
+    int counter = 0;
     for (vector<string>::iterator it = files.begin() ; it != files.end(); ++it)
     {
         tbb::tick_count t0;
+        Rect r(0, 0, roiSize.width, roiSize.height);
         
         image = imread(*it, CV_LOAD_IMAGE_COLOR); 
 
+        *classIdx = counter;
         t0 = tbb::tick_count::now();
-        cvtColor(image, grayImg, CV_RGB2GRAY);
+        cvtColor(image(r), grayImg, CV_RGB2GRAY);
         t0_gray += (tbb::tick_count::now()-t0);
         hog.winSize = Size(grayImg.cols, grayImg.rows);
         hog.compute( grayImg, descriptors, Size( 0, 0 ), Size( 0, 0 ) );
+        std::copy(descriptors.begin(), descriptors.end(), pFeature);
 
         cout << "descriptor size is " << descriptors.size() << endl;
+        for (int i = 0; i < 10; i++)
+        {
+            
+            pFeature[i] = counter * 1 + i * 0.1;
+            cout << pFeature[i] << ' ';
+        }        
+        cout << endl;
+
+        status = H5Sselect_elements(space, H5S_SELECT_APPEND, 1, (const hsize_t *)&coords);
+        status = H5Dwrite(dataset, hog_tid, H5S_ALL, H5S_ALL, H5P_DEFAULT, hogFeatureBuff);
+        counter ++;
+        coords[0]++;
+        //break;
+        //break;
     }
+
+    H5Tclose(hog_tid);
+    H5Tclose(array_tid);
+    H5Sclose(space);
+    H5Dclose(dataset);
+    H5Fclose(feature_file);
+
 }
 
 
@@ -232,30 +296,40 @@ void saveFeatureToHDF5()
 
     file = H5Fcreate(FILE_NAME, H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT);
 
-    hogFeature featureArray[IMG_NUMBER];
+    
+    char *hogFeatureBuff = (char *)malloc(HOG_FEATURE_SIZE * 10);
+    hogFeature *featureArray;
 
     int num = 0;
+    cout << "hogFeatureBuff = " << hogFeatureBuff << endl;
     for (int i = 0; i < IMG_NUMBER; i++)
     {
+        featureArray = (hogFeature *) &hogFeatureBuff[HOG_FEATURE_SIZE * i];
         num = i * 1000;
-        featureArray[i].classIdx = i;
+        featureArray->classIdx = i;
+        float *feature = (float *)&hogFeatureBuff[HOG_FEATURE_SIZE * i + sizeof(int)];
         for (int j = 0; j < 100; j++)
         {
-            featureArray[i].feature[j] = num;
+            feature[j] = num * 0.01;
             num += 1;
         }
     }
 
     space = H5Screate_simple(1, img_dim, NULL);
-    array_tid = H5Tarray_create(H5T_NATIVE_INT, 1, array_dim);
+    array_tid = H5Tarray_create(H5T_NATIVE_FLOAT, 1, array_dim);
+    //array_tid = H5Tvlen_create(H5T_NATIVE_INT);
 
-    hog_tid = H5Tcreate (H5T_COMPOUND, sizeof(hogFeature));
+    hog_tid = H5Tcreate (H5T_COMPOUND, sizeof(int) + sizeof(float) * 100);
 
     H5Tinsert(hog_tid, "classIdx", HOFFSET(hogFeature, classIdx), H5T_NATIVE_INT);
-    H5Tinsert(hog_tid, "feature", HOFFSET(hogFeature, feature), array_tid);
+    //H5Tinsert(hog_tid, "feature", HOFFSET(hogFeature, feature), array_tid);
+    H5Tinsert(hog_tid, "feature", 4, array_tid);
+
+    cout << "HOFFSET classIdx " << HOFFSET(hogFeature, classIdx) << endl;
+    cout << "HOFFSET feature " << HOFFSET(hogFeature, feature) << endl;
 
     dataset = H5Dcreate(file, DATASET_NAME, hog_tid, space, H5P_DEFAULT, H5P_DEFAULT, H5P_DEFAULT);
-    status = H5Dwrite(dataset, hog_tid, H5S_ALL, H5S_ALL, H5P_DEFAULT, featureArray);
+    status = H5Dwrite(dataset, hog_tid, H5S_ALL, H5S_ALL, H5P_DEFAULT, hogFeatureBuff);
 
 
     H5Tclose(hog_tid);
@@ -281,7 +355,7 @@ void loadFeatureToHDF5()
     hsize_t out_dim[] = {1};
     hsize_t coords[] = {0};
     herr_t status;
-    hsize_t size;
+    hsize_t size, dataSize;
     hsize_t rank, npoints;
 
 
@@ -296,23 +370,27 @@ void loadFeatureToHDF5()
     size = H5Dget_storage_size(dataset);
     H5Sget_simple_extent_dims(space, dims_out, NULL);   
     npoints = H5Sget_simple_extent_npoints(space);
+    dataSize = H5Tget_size(hog_tid);
 
     cout << __FUNCTION__ << " size is " << size << endl;
     cout << __FUNCTION__ << " rank is " << rank << endl;    
     cout << __FUNCTION__ << " dims_out is " << dims_out[0] << "," << dims_out[1] << endl;    
-    cout << __FUNCTION__ << " npoints is " << npoints << endl;    
+    cout << __FUNCTION__ << " npoints is " << npoints << endl;
+    cout << __FUNCTION__ << " dataSize is " << dataSize << endl;    
 
     memSpace = H5Screate_simple(1, out_dim, NULL);
 
-    coords[0] = 9;
+    coords[0] = 1;
     status = H5Sselect_elements(space, H5S_SELECT_SET, 1, (const hsize_t *)&coords);
-    hogFeature f;
-    status = H5Dread(dataset, hog_tid, memSpace, space, H5P_DEFAULT, &f);
+    hogFeature *f = (hogFeature *)malloc(dataSize);
 
-    cout << "class: " << f.classIdx << endl;
-    for (int i = 0; i < 100; i++)
+    status = H5Dread(dataset, hog_tid, memSpace, space, H5P_DEFAULT, f);
+
+    cout << "class: " << f->classIdx << endl;
+    float *feature = (float *) ((char *)f + sizeof(int));
+    for (int i = 0; i < 10; i++)
     {
-        cout << f.feature[i] << ' ';
+        cout << feature[i] << ' ';
     }
     cout << endl;
 
@@ -332,11 +410,11 @@ int main()
     tbb::tick_count t0, t1;
 
     t0 = tbb::tick_count::now();
-    findHogSerial(imgNameList); 
+    findHogSerial(imgNameList, Size(320, 240)); 
     t1 = tbb::tick_count::now();
     cout << "findHogSerial takes " << (t1 - t0).seconds() << endl;
 
-    saveFeatureToHDF5();
+    //saveFeatureToHDF5();
     loadFeatureToHDF5();
 
     return 0;
