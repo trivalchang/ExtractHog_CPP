@@ -25,6 +25,9 @@
 
 #endif
 
+#include <libxml/parser.h>
+#include <libxml/tree.h>
+
 #include "H5Cpp.h"
 using namespace H5;
 
@@ -183,6 +186,38 @@ void findHogParallel(vector<string> &files) {
     );
 }
 
+static void
+print_element_names(xmlNode * a_node)
+{
+    xmlNode *cur_node = NULL;
+
+    for (cur_node = a_node; cur_node; cur_node = cur_node->next) {
+        if (cur_node->type == XML_ELEMENT_NODE) {
+            printf("node type: Element, name: %s\n", cur_node->name);
+        }
+
+        print_element_names(cur_node->children);
+    }
+}
+
+void readXML(char *fname)
+{
+    xmlDoc *doc = NULL;
+    xmlNode *root_element = NULL;
+
+    doc = xmlReadFile(fname, NULL, 0);
+
+    if (doc == NULL) 
+    {
+        cout << "error: could not parse file " << fname << endl;
+    }
+
+    root_element = xmlDocGetRootElement(doc);
+    print_element_names(root_element);
+    xmlFreeDoc(doc);
+    xmlCleanupParser();
+}
+
 
 void findHogSerial(vector<string> &files, Size roiSize) 
 {
@@ -262,13 +297,6 @@ void findHogSerial(vector<string> &files, Size roiSize)
         std::copy(descriptors.begin(), descriptors.end(), pFeature);
 
         cout << "descriptor size is " << descriptors.size() << endl;
-        for (int i = 0; i < 10; i++)
-        {
-            
-            pFeature[i] = index * 1 + i * 0.1;
-            cout << pFeature[i] << ' ';
-        }        
-        cout << endl;
 
         // increase the extent of dataset by 1
         numOfFeature++;
@@ -454,6 +482,8 @@ int main()
 	getdir("./samples", imgNameList);
 	cout << "img count = " << imgNameList.size() << endl;
     tbb::tick_count t0, t1;
+
+    readXML("./samples/img128_0.xml");
 
     t0 = tbb::tick_count::now();
     findHogSerial(imgNameList, Size(320, 240)); 
